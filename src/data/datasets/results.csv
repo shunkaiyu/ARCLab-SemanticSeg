@@ -1,0 +1,15 @@
+,label,mIoU
+0,Black Background,0.9603999999999999
+1,Abdominal Wall,0.7444333333333333
+2,Liver,0.7469333333333333
+3,Gastrointestinal Tract,0.4241333333333333
+4,Fat,0.7588333333333334
+5,Grasper,0.45986666666666665
+6,Connective Tissue,0.0
+7,Blood,0.0
+8,Cystic Duct,0.0
+9,L-hook Electrocautery,0.24960000000000002
+10,Gallblader,0.6284666666666667
+11,Hepatic Vein,0.0
+12,Liver Ligament,0.0
+13,invalid,0.0
