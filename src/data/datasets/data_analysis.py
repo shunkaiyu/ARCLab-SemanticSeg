@@ -170,18 +170,19 @@ def brokenPlot(dx,dy,df,leftHighLim,lowLim,highLim,title):
 def getLabel(img, color2id):
     label = set()
     h,w,c = img.shape
-    for i,j in zip(range(0,h),range(0,w)):
-        pixel = img[i,j,:]
-        pixel = pixel[::-1]
-        #print(pixel.shape)
-        color = ','.join(str(e) for e in pixel)
-        color = '['+color+']'
-        #label.add(color)
-        if color in color2id.keys():
-            #print(color)
-            label.add(color2id[color])
-        else:
-            label.add('invalid')
+    for i in range(0,h):
+        for j in range(0,w):
+            pixel = img[i,j,:]
+            pixel = pixel[::-1]
+            #print(pixel.shape)
+            color = ','.join(str(e) for e in pixel)
+            color = '['+color+']'
+            #label.add(color)
+            if color in color2id.keys():
+                #print(color)
+                label.add(color2id[color])
+            else:
+                label.add('invalid')
     return label
 
 def getSetLabel(path, id2num,color2id):
