@@ -36,17 +36,17 @@ def main():
     df['part1'] = 0
     for v in videos: 
         i = v[-2:]
-        if int(i) < 23:
+        if int(i) in [1,35,43,25,20,9]:
             df['part1']+=df['video'+i]
     df['part2'] = 0
     for v in videos: 
         i = v[-2:]
-        if int(i) > 23 and int(i) < 36:
+        if int(i) in [12,37,48,27,28]:
             df['part2']+=df['video'+i]
     df['part3'] = 0
     for v in videos: 
         i = v[-2:]
-        if int(i) > 36:
+        if int(i) in [17,55,26,18,52,24]:
             df['part3']+=df['video'+i]
 
     df = df.rename(columns={"part1": "fold 1", "part2": "fold 2", "part3": "fold 3", "invalid": "Invalid"}) 
@@ -56,9 +56,9 @@ def main():
     df['fold 2&3'] = df['fold 2']+df['fold 3']
     df['entire dataset'] = df['fold 1']+df['fold 2']+df['fold 3']
 
-    brokenPlot('fold 1','Label',df,10000000,10000000,1000000000, "Fold 1 Class Distribution")
-    brokenPlot('fold 2','Label',df,10000000,10000000,1000000000, "Fold 2 Class Distribution")
-    brokenPlot('fold 3','Label',df,10000000,10000000,1000000000, "Fold 3 Class Distribution")
+    brokenPlot('fold 1','Label',df,1000000,5000000,1000000000, "Fold 1 Class Distribution")
+    brokenPlot('fold 2','Label',df,1000000,5000000,1000000000, "Fold 2 Class Distribution")
+    brokenPlot('fold 3','Label',df,1000000,5000000,1000000000, "Fold 3 Class Distribution")
     brokenPlot('entire dataset','Label',df,5000000,1000000,1000000000, "Entire Dataset Class Distribution")
 
     #Get name id to number of pixel map
@@ -170,19 +170,18 @@ def brokenPlot(dx,dy,df,leftHighLim,lowLim,highLim,title):
 def getLabel(img, color2id):
     label = set()
     h,w,c = img.shape
-    for i in range(0,h):
-        for j in range(0,w):
-            pixel = img[i,j,:]
-            pixel = pixel[::-1]
-            #print(pixel.shape)
-            color = ','.join(str(e) for e in pixel)
-            color = '['+color+']'
-            #label.add(color)
-            if color in color2id.keys():
-                #print(color)
-                label.add(color2id[color])
-            else:
-                label.add('invalid')
+    for i,j in zip(range(0,h),range(0,w)):
+        pixel = img[i,j,:]
+        pixel = pixel[::-1]
+        #print(pixel.shape)
+        color = ','.join(str(e) for e in pixel)
+        color = '['+color+']'
+        #label.add(color)
+        if color in color2id.keys():
+            #print(color)
+            label.add(color2id[color])
+        else:
+            label.add('invalid')
     return label
 
 def getSetLabel(path, id2num,color2id):

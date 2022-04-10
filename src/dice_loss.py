@@ -58,6 +58,11 @@ def dice_loss(input: torch.Tensor, target: torch.Tensor, eps: float = 1.0, ignor
     if not input.device == target.device:
         raise ValueError(f"input and target must be in the same device. Got: {input.device} and {target.device}")
     
+    # print("Start debugging:")
+    # print(input.shape)
+    # target = torch.squeeze(target)
+    # print(target.shape)
+
     # compute softmax over the classes axis
     input_soft: torch.Tensor = F.softmax(input, dim=1)
 
@@ -70,6 +75,13 @@ def dice_loss(input: torch.Tensor, target: torch.Tensor, eps: float = 1.0, ignor
 
     # compute the actual dice score
     dims = (2, 3)
+    
+    # print(target_one_hot.shape)
+    # target_one_hot=torch.squeeze(target_one_hot)
+    # print("$$$$$$$$$$$$$$$$")
+    # print(input_soft.shape)
+    # print(target_one_hot.shape)
+    
     intersection = torch.sum(input_soft * target_one_hot, dims)
     cardinality = torch.sum(input_soft + target_one_hot, dims)
 
