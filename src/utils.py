@@ -58,8 +58,8 @@ class Evaluate():
             seg = seg.cuda()
             gt = gt.cuda()
         
-        print(seg.size())
-        print(gt.size())    
+        #print(seg.size())
+        #print(gt.size())    
 
         tpmult = seg * gt    #times prediction and gt coincide is 1
         tp = torch.sum(torch.sum(torch.sum(tpmult, dim=0, keepdim=True), dim=2, keepdim=True), dim=3, keepdim=True).squeeze()

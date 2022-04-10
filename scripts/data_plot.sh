@@ -1,11 +1,11 @@
 #!/bin/bash
 
 dataset="cholec"
-fold1="cholec_12_3"
-fold2="cholec_13_2"
-fold3="cholec_23_1"
-save_dir="./vis_plots/"
-#mkdir -p $save_dir
+fold1="fold_12_3"
+fold2="fold_13_2"
+fold3="fold_23_1"
+save_dir="/home/arcseg/Desktop/Shunkai-working/src/data/datasets/vis_plots_newSplit/"
+mkdir -p $save_dir
 
 python ../src/data/datasets/data_analysis.py \
 	--folder1 $fold1 \

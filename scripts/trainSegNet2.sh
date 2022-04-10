@@ -2,12 +2,11 @@
 
 model="smp_DeepLabV3+"
 
-
 epochs=50
 workers=1
 
 train_batch_size=12 # [1, 11, 37]
-val_batch_size=1 # [1, 3, 29]
+val_batch_size=4 # [1, 3, 29]
 full_res_validation="False"
 
 lr=1e-3
@@ -19,22 +18,22 @@ dice_loss_factor=-1
 
 resized_height=256 # for random crop
 resized_width=256 # for random crop
-cropSize=256
+cropSize=-1
 
 dataset="cholec"
-data_dir="../src/data/datasets/cholec_13_2"
+data_dir="../src/data/datasets/fold_13_2"
 json_path="../src/data/classes/cholecSegClasses.json"
 #checkpoint_path="/home/arcseg/jonathan/ARCSeg/results/resnet18_unet/cholec/bs_32_lr1e-3_e100/resnet18_unet_cholec_bs32lr0.001e100_checkpoint"
 
 display_samples="False"
 save_samples="True"
 
-	save_dir="../results/${model}/${dataset}_13_2/256x256_Crop_256x512_Resized/dice_factor_${dice_loss_factor}/bs_train${train_batch_size}_val${val_batch_size}/imsize_${resized_height}x${resized_width}_wd_${wd}_optim_${optimizer}_lr${lr}_steps_${lr_steps}_gamma_${step_gamma}/e${epochs}_seed6210"
+	save_dir="../results/${model}/${dataset}_fold_13_2/no_crop/dice_factor_${dice_loss_factor}/bs_train${train_batch_size}_val${val_batch_size}/imsize_${resized_height}x${resized_width}_wd_${wd}_optim_${optimizer}_lr${lr}_steps_${lr_steps}_gamma_${step_gamma}/e${epochs}_seed6210"
 	seg_save_dir="${save_dir}/seg_results"
 
 	mkdir -p $save_dir
 
-	python ../src/trainSegNet.py \
+	python ../src/trainSegNet_fullResVal.py \
 	    --model $model \
 	    --workers $workers \
 	    --trainBatchSize $train_batch_size \

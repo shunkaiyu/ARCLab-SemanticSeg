@@ -10,7 +10,6 @@ import torch.optim as optim
 import torch.utils.data
 from torchsummary import summary
 import segmentation_models_pytorch as smp
-from torchvision import transforms, datasets
 
 # general imports
 import argparse
@@ -25,14 +24,13 @@ import random
 import utils
 from utils import dice
 from dice_loss import DiceLoss
-from torchgeometry.losses.focal import FocalLoss  
 from skimage.metrics import hausdorff_distance
 
 # model imports
 from model.unet import UNet
 from model.segnet import SegNet
 from model.resnet_unet import ResNetUNet
-from data.dataloaders.SegNetDataLoaderV2 import SegNetDataset # V2 is for loading entire dataset into memory, considering cholec data can easily fit into memory
+from data.dataloaders.SegNetDataLoaderV3 import SegNetDataset # V2 is for loading entire dataset into memory, considering cholec data can easily fit into memory
 
 
 parser = argparse.ArgumentParser(description='Semantic Segmentation Training Parameters')
@@ -62,8 +60,6 @@ parser.add_argument('--lr_steps', default=2, type=int, help='number of steps to 
 parser.add_argument('--step_gamma', default=0.1, type=float, help='gamma decay factor when stepping the Learning Rate')
 parser.add_argument('--resnetModel', default=18, type=float, help='resnet model number')
 parser.add_argument('--differential_lr', default=False, type=bool, help='use differential learning rate for pretrained encoder layers')
-parser.add_argument('--focal_loss_factor', default=0.5, type=float, help='loss weight factor for focal loss')
-parser.add_argument('--alpha_FL', default=0.25, type=float, help='alpha for focal loss')
 
 # IMAGE PARAMETERS
 parser.add_argument('--resizedHeight', default=256, type=int, help='height of the input image to the network')
@@ -115,26 +111,11 @@ def main():
     image_size = [args.resizedHeight, args.resizedWidth]
 
     # Data Augmentations and Loading
-
-    im_mean = [0.337, 0.212, 0.182]
-    im_std = [0.278, 0.218, 0.185]
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        # transforms.Resize(256)
-        transforms.RandomRotation(degrees=(-90, 90)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
-        transforms.Normalize(mean=im_mean,
-                             std=im_std),
-        transforms.RandomSizedCrop(256),
-    ])
-
     rotate, horizontal_flip, vertical_flip = True, True, True
     logger.info(f"Data Augmentations: rotate={rotate}, horizontal_flip={horizontal_flip}, vertical_flip={vertical_flip}")
 
     image_datasets = {x: SegNetDataset(os.path.join(args.data_dir, x), args.cropSize, args.json_path, x, args.dataset, 
-                      image_size, rotate=rotate, horizontal_flip=horizontal_flip, vertical_flip=vertical_flip, full_res_validation=args.full_res_validation, transform=data_transform) for x in ['train', 'test']}
+                      image_size, rotate=rotate, horizontal_flip=horizontal_flip, vertical_flip=vertical_flip, full_res_validation=args.full_res_validation) for x in ['train', 'test']}
 
     dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x],
                                                   batch_size=args.trainBatchSize if x == 'train' else args.valBatchSize,
@@ -263,21 +244,17 @@ def main():
     #    if n.split(".")[0] != "base_model":
     #        p.requires_grad = False
 
-    if args.dice_loss_factor == -1 and args.focal_loss_factor == -1:
+    if args.dice_loss_factor == -1:
         logger.info("Training with CE Loss Only")
         dice_loss = None
-        focal_loss = None
     elif args.dice_loss_factor >= 0.0 and args.dice_loss_factor <= 1.0 and args.dataset == "synapse":
         logger.info(f"dice loss factor: {args.dice_loss_factor}")
         dice_loss = DiceLoss(ignore_index=21)
-    elif args.dice_loss_factor >= 0.0 and args.dice_loss_factor <= 1.0 and args.dataset != "synapse" and args.focal_loss_factor >= 0.0 and args.focal_loss_factor <= 1.0:
+    elif args.dice_loss_factor >= 0.0 and args.dice_loss_factor <= 1.0 and args.dataset != "synapse":
         logger.info(f"dice loss factor: {args.dice_loss_factor}")
-        logger.info(f"focal_loss_factor: {args.focal_loss_factor}")
-        focal_loss = FocalLoss(args.alpha_FL)
-        # print("-------------")
         dice_loss = DiceLoss() # assumes that, if not training with 'synapse' dataset, all classes will be factored into the dice loss computation
     else:
-        raise ValueError("args.dice/focal_loss_factor must be a float value from 0.0 to 1.0")
+        raise ValueError("args.dice_loss_factor must be a float value from 0.0 to 1.0")
     
     # Optimization Setup
     if args.dataset == "synapse":
@@ -333,16 +310,16 @@ def main():
     for epoch in range(args.epochs):
 
         if (epoch+1) == 1 or (epoch+1) % 25 == 0: # dice coefficient and hausdorff distance every 25 epochs
-            train_loss, train_dice_coeff, train_haus_dist = train(dataloaders['train'], model, criterion, dice_loss, focal_loss, optimizer, scheduler, epoch, key, train_losses, image_mean, image_std, logger, args)
+            train_loss, train_dice_coeff, train_haus_dist = train(dataloaders['train'], model, criterion, dice_loss, optimizer, scheduler, epoch, key, train_losses, image_mean, image_std, logger, args)
             logger.info(f"Epoch {epoch+1}/{args.epochs}: Train Loss={train_loss}, Avg. Train DC={train_dice_coeff}, Avg. Train HD={train_haus_dist}, LR={optimizer.param_groups[0]['lr']}")
 
-            val_loss, val_dice_coeff, val_haus_dist = validate(dataloaders['test'], model, criterion, dice_loss, focal_loss, epoch, key, evaluator, val_losses, image_mean, image_std, logger, args)
+            val_loss, val_dice_coeff, val_haus_dist = validate(dataloaders['test'], model, criterion, dice_loss, epoch, key, evaluator, val_losses, image_mean, image_std, logger, args)
             logger.info(f"Epoch {epoch+1}/{args.epochs}: Val Loss={val_loss}, Avg. Val DC={val_dice_coeff}, Avg. Val HD={val_haus_dist}, LR={optimizer.param_groups[0]['lr']}")
         else:
-            train_loss = train(dataloaders['train'], model, criterion, dice_loss, focal_loss, optimizer, scheduler, epoch, key, train_losses, image_mean, image_std, logger, args)
+            train_loss = train(dataloaders['train'], model, criterion, dice_loss, optimizer, scheduler, epoch, key, train_losses, image_mean, image_std, logger, args)
             logger.info(f"Epoch {epoch+1}/{args.epochs}: Train Loss={train_loss}, LR={optimizer.param_groups[0]['lr']}")
 
-            val_loss = validate(dataloaders['test'], model, criterion, dice_loss, focal_loss, epoch, key, evaluator, val_losses, image_mean, image_std, logger, args)
+            val_loss = validate(dataloaders['test'], model, criterion, dice_loss, epoch, key, evaluator, val_losses, image_mean, image_std, logger, args)
             logger.info(f"Epoch {epoch+1}/{args.epochs}: Val Loss={val_loss}, LR={optimizer.param_groups[0]['lr']}")
 
         scheduler.step()
@@ -418,7 +395,7 @@ def main():
     logger.info(f"Accuracy Curve saved to {args.save_dir}/{figure_name}")
 
 
-def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, scheduler, epoch, key, losses, img_mean, img_std, logger, args):
+def train(train_loader, model, criterion, dice_loss, optimizer, scheduler, epoch, key, losses, img_mean, img_std, logger, args):
     '''
     Run one training epoch
     '''
@@ -436,14 +413,14 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
     total_samples = args.trainBatchSize
 
     for i, (img, gt, label) in train_loop:
-        #print(img.size(0))
+
         # For TenCrop Data Augmentation
-        # if args.cropSize != -1:
-        #     img = img.view(-1, 3, args.cropSize, args.cropSize)
-        #     gt = gt.view(-1, 3, args.cropSize, args.cropSize)
-        # else:
-        #     img = img.view(-1, 3, args.resizedHeight, args.resizedWidth)
-        #     gt = gt.view(-1, 3, args.resizedHeight, args.resizedWidth)
+        if args.cropSize != -1:
+            img = img.view(-1, 3, args.cropSize, args.cropSize)
+            gt = gt.view(-1, 3, args.cropSize, args.cropSize)
+        else:
+            img = img.view(-1, 3, args.resizedHeight, args.resizedWidth)
+            gt = gt.view(-1, 3, args.resizedHeight, args.resizedWidth)
         
         img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
 
@@ -453,30 +430,18 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
             img = img.cuda()
             label = label.cuda()
 
-        # print(img.shape)
-        # print(gt.shape)
-        # print(label.shape)
         # Compute output
-        #model.eval()
         seg = model(img)
 
-        # print(seg.shape)
-
         #if args.dataset == "synapse":
-        #loss = (args.focal_loss_factor * focal_loss(seg,label)) + ((1 - args.focal_loss_factor) * criterion(seg, label))
-        # print(criterion(seg, label))
-        # print(dice_loss(seg, label))
-        # print(focal_loss(seg,label).mean())
-        if args.dice_loss_factor != -1 and dice_loss != None and focal_loss != None:
-        	loss = (args.dice_loss_factor * dice_loss(seg, label)) + (args.focal_loss_factor * focal_loss(seg,label).mean()) + ((1 - args.dice_loss_factor - args.focal_loss_factor) * criterion(seg, label))
+        if args.dice_loss_factor != -1 and dice_loss != None:
+        	loss = (args.dice_loss_factor * dice_loss(seg, label)) +  ((1 - args.dice_loss_factor) * criterion(seg, label))
         else:
         	loss = criterion(seg, label)
         #else:
         #    loss = (0.5 * dice_loss(seg, label)) +  (0.5 * criterion(seg, label))
 
         total_train_loss += loss.mean().item()
-        #print(loss)
-        #print(total_train_loss)
 
         # PyTorch recommended over optimizer.zero_grad()
         # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#use-parameter-grad-none-instead-of-model-zero-grad-or-optimizer-zero-grad
@@ -521,12 +486,11 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
 
     if (epoch+1) == 1 or (epoch+1) % 25 == 0:
         return total_train_loss/len(train_loop), avg_dice_coeff, avg_haus_dist
-        #len(train_loop), avg_dice_coeff, avg_haus_dist
     else:
         return total_train_loss/len(train_loop)
 
 @torch.no_grad() # disables gradient calculations
-def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, evaluator, losses, img_mean, img_std, logger, args):
+def validate(val_loader, model, criterion, dice_loss, epoch, key, evaluator, losses, img_mean, img_std, logger, args):
     '''
     Run evaluation
     '''
@@ -557,13 +521,8 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
         seg = model(img)
 
         #if args.dataset == "synapse":
-        #print("-----------")
-        #print(seg.shape)
-        #print(label.shape)
-        #print("-----------")
-        if args.dice_loss_factor != -1 and dice_loss != None and focal_loss != None:
-        	loss = (args.dice_loss_factor * dice_loss(seg, label)) + (args.focal_loss_factor * focal_loss(seg,label)) + ((1 - args.dice_loss_factor - args.focal_loss_factor) * criterion(seg, label))
-            #loss = (args.dice_loss_factor * dice_loss(seg, label)) +  ((1 - args.dice_loss_factor) * criterion(seg, label))
+        if args.dice_loss_factor != -1 and dice_loss != None:
+        	loss = (args.dice_loss_factor * dice_loss(seg, label)) +  ((1 - args.dice_loss_factor) * criterion(seg, label))
         else:
         	loss = criterion(seg, label)
         #else:

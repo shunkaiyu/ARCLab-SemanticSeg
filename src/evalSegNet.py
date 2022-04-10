@@ -56,6 +56,8 @@ parser.add_argument('--save-dir', dest='save_dir',
             default='save_temp', type=str)
 parser.add_argument('--saveTest', default='False', type=str,
             help='Saves the validation/test images if True')
+parser.add_argument('--data_path',
+            help='Data directory to be evaluated', default='data_temp', type=str)
 
 #use_gpu = torch.cuda.is_available()
 # GPU Check
@@ -117,7 +119,8 @@ def main():
         ])
 
     # Data Loading
-    data_dir = "../src/data/datasets/cholec_12_3"
+    #data_dir = "../src/data/datasets/cholec_12_3"
+    data_dir = args.data_path
     # json path for class definitions
     json_path = "../src/data/classes/cholecSegClasses.json"
 
@@ -199,10 +202,9 @@ def validate(val_loader, model, criterion, key, evaluator):
     for i, (img, gt, label) in enumerate(val_loader):
 
         # Process the network inputs and outputs
-        img = utils.normalize(img, torch.Tensor([0.295, 0.204, 0.197]), torch.Tensor([0.221, 0.188, 0.182]))
-        gt_temp = gt * 255
-        label = utils.generateLabel4CE(gt_temp, key)
-        oneHotGT = utils.generateOneHot(gt_temp, key)
+        img = utils.normalize(img, torch.Tensor([0.337, 0.212, 0.182]), torch.Tensor([0.278, 0.218, 0.185]))
+        #img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
+        oneHotGT = one_hot(label, len(key)).permute(0, 3, 1, 2)
 	
         img, label = Variable(img), Variable(label)
 
@@ -213,33 +215,11 @@ def validate(val_loader, model, criterion, key, evaluator):
 
         # Compute output
         seg = model(img)
-        seg = torch.argmax(seg, dim=1)
-        seg = seg.cpu()
-        seg = seg.data.numpy()
-        seg = reverseOneHot(seg,key)
-        print(len(seg))
-        print(label.size())
-        seg = np.squeeze(seg[0]).astype(np.uint8)
-        seg = cv2.cvtColor(seg, cv2.COLOR_BGR2RGB) / 255
-
-        print("-----------------------------")
-        print(seg.shape)
-        print(label)
-        #print(img.size())
-
-        
-        to_tensor = ToTensor()
-        #label = to_tensor(label)
-        seg = to_tensor(seg)
+        #print("-----------")
+        #print(seg.shape)
         seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
-        #label = TF.resize(label, [480, 854], interpolation=Image.BILINEAR)
-        
-        #label = torch.unsqueeze(label, 0)
-        #label = label.to(device)
-        seg = torch.unsqueeze(seg, 0)
-        seg = seg.to(device)
-        print(seg.size())
-        
+
+        #seg = label.clone().detach()
         loss = criterion(seg, label)
         
         total_val_loss += loss.mean().item()
@@ -249,7 +229,7 @@ def validate(val_loader, model, criterion, key, evaluator):
         seg = torch.argmax(seg, dim=1)
 
         # Dice Coefficient and Hausdorff Distance Metrics every 10 epochs
-        #if (epoch+1) == 1 or (epoch+1) % 25 == 0:
+        #if (epoch+1) == 1 or (epoch+1) % 1 == 0:
         if True:
             for seg_im, label_im in zip(seg, label): # iterate over each image in the batch
                 seg_im, label_im = one_hot(seg_im, len(key)), one_hot(label_im, len(key))
@@ -273,13 +253,13 @@ def validate(val_loader, model, criterion, key, evaluator):
         else:
             val_loop.set_postfix(avg_loss = total_val_loss / (i + 1))
         
-        #val_loop.set_description(f"Epoch [{epoch + 1}/{args.epochs}]")
+        val_loop.set_description(f"i = [{i + 1}]")
 
-        print('[%d/%d] Loss: %.4f' % (i, len(val_loader)-1, loss.mean().item()))
+        #print('[%d/%d] Loss: %.4f' % (i, len(val_loader)-1, loss.mean().item()))
 
-        utils.displaySamples(img, seg, gt, use_gpu, key, args.saveTest, 0, i, args.save_dir)
+        #utils.displaySamples(img, seg, gt, use_gpu, key, args.saveTest, 0, i, args.save_dir)
         
-        return total_val_loss/len(val_loop), avg_dice_coeff, avg_haus_dist
+    return total_val_loss/len(val_loop), avg_dice_coeff, avg_haus_dist
 
         #evaluator.addBatch(seg, oneHotGT)
 
