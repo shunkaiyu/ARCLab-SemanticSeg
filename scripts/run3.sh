@@ -1,10 +1,10 @@
 #!/bin/bash
-./trainSegNet.sh;
+#./trainSegNet_unet.sh;
 
-./trainSegNet2.sh;
+#./trainSegNet2_unet.sh;
 
-./trainSegNet3.sh;
+#./trainSegNet3_unet.sh;
 
-#./evalSegNet.sh;
-#./evalSegNet2.sh;
-#./evalSegNet3.sh;
+./evalSegNet.sh;
+./evalSegNet2.sh;
+./evalSegNet3.sh;

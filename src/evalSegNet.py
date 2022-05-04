@@ -13,7 +13,7 @@ import argparse
 import os
 
 # utility imports
-from torchvision.transforms.transforms import ToTensor
+#from torchvision.transforms.transforms import ToTensor
 import json
 
 from PIL import Image
@@ -33,12 +33,13 @@ from torch.nn.functional import one_hot
 from utils import dice
 from dice_loss import DiceLoss
 from skimage.metrics import hausdorff_distance
+from torchgeometry.losses.focal import FocalLoss  
 
 import numpy as np
 import matplotlib.pyplot as plt
 import utils
 from model.segnet import SegNet
-from data.dataloaders.SegNetDataLoaderV2 import SegNetDataset
+from data.dataloaders.SegNetDataLoaderV3 import SegNetDataset
 
 parser = argparse.ArgumentParser(description='PyTorch Semantic Segmentation Evaluation')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
@@ -114,18 +115,19 @@ def main():
 
     data_transform = transforms.Compose([
             # transforms.Resize((args.imageSize, args.imageSize), interpolation=Image.NEAREST),
-            transforms.Resize((480, 854), interpolation=Image.NEAREST),
+            # transforms.Resize((480, 854), interpolation=Image.NEAREST),
             transforms.ToTensor(),
         ])
 
     # Data Loading
     #data_dir = "../src/data/datasets/cholec_12_3"
     data_dir = args.data_path
+    #print(args.data_path)
     # json path for class definitions
     json_path = "../src/data/classes/cholecSegClasses.json"
 
     image_dataset = SegNetDataset(os.path.join(data_dir,'test'), data_transform, json_path, 'test')
-    print(len(image_dataset))
+    #print(len(image_dataset))
     dataloader = torch.utils.data.DataLoader(image_dataset,
                                              batch_size=args.batchSize,
                                              shuffle=True,
@@ -171,8 +173,8 @@ def main():
 
     # Evaulate on validation/test set
     print('>>>>>>>>>>>>>>>>>>>>>>>Testing<<<<<<<<<<<<<<<<<<<<<<<')
-    val_loss, val_dice_coeff, val_haus_dist = validate(dataloader, model, criterion, key, evaluator)
-    print(f"Loss={val_loss}, Avg. DC={val_dice_coeff}, Avg. HD={val_haus_dist}")
+    val_loss, val_dice_coeff, val_haus_dist, focal_loss = validate(dataloader, model, criterion, key, evaluator)
+    print(f"Loss={val_loss}, Avg. DC={val_dice_coeff}, Avg. HD={val_haus_dist}, Focal Loss={focal_loss}")
 
     # Calculate the metrics
     print('>>>>>>>>>>>>>>>>>> Evaluating the Metrics <<<<<<<<<<<<<<<<<')
@@ -193,12 +195,15 @@ def validate(val_loader, model, criterion, key, evaluator):
     total_haus_dist = 0
     avg_dice_coeff = 0
     avg_haus_dist = 0
+    total_focal_loss = 0
     total_samples = args.batchSize
 
     val_loop = tqdm(enumerate(val_loader), total=len(val_loader))
     # Switch to evaluate mode
     model.eval()
 
+    image_mean = [0.337, 0.212, 0.182]
+    image_std = [0.278, 0.218, 0.185]
     for i, (img, gt, label) in enumerate(val_loader):
 
         # Process the network inputs and outputs
@@ -217,11 +222,14 @@ def validate(val_loader, model, criterion, key, evaluator):
         seg = model(img)
         #print("-----------")
         #print(seg.shape)
-        seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
+        # seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
 
         #seg = label.clone().detach()
         loss = criterion(seg, label)
-        
+        focal_loss = FocalLoss(0.25)
+        focal = focal_loss(seg,label)
+        total_focal_loss += focal.mean().item()
+
         total_val_loss += loss.mean().item()
 
         evaluator.addBatch(seg, oneHotGT, args)
@@ -256,10 +264,11 @@ def validate(val_loader, model, criterion, key, evaluator):
         val_loop.set_description(f"i = [{i + 1}]")
 
         #print('[%d/%d] Loss: %.4f' % (i, len(val_loader)-1, loss.mean().item()))
-
+        #print("ready to save")
+        utils.displaySamples(img, seg, gt, use_gpu, key, "True", epoch=0, imageNum=i, save_dir=args.save_dir, total_epochs=1)
         #utils.displaySamples(img, seg, gt, use_gpu, key, args.saveTest, 0, i, args.save_dir)
         
-    return total_val_loss/len(val_loop), avg_dice_coeff, avg_haus_dist
+    return total_val_loss/len(val_loop), avg_dice_coeff, avg_haus_dist, total_focal_loss/len(val_loop)
 
         #evaluator.addBatch(seg, oneHotGT)
 

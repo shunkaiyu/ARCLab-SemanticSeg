@@ -131,8 +131,8 @@ def main():
     )
     #model = DeepLabV3Plus(encoder_name="resnet18", encoder_weights="imagenet", in_channels=3, classes=num_classes)
     model.to(device)
-
-    checkpoint = torch.load("smp_DeepLabV3+_cholec_bs12lr0.001e50_checkpoint")
+    model_dir = args.model_path
+    checkpoint = torch.load(model_dir)
     model.load_state_dict(checkpoint['state_dict'])
 
     model.eval()
@@ -159,10 +159,10 @@ def main():
     	    seg = reverseOneHot(seg, key)
     	    seg = np.squeeze(seg[0]).astype(np.uint8)
     	    seg = cv2.cvtColor(seg, cv2.COLOR_BGR2RGB)
-    	    print(seg.shape)
+    	    #print(seg.shape)
     	    #seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
     	    seg = cv2.resize(seg, (854, 480), 0, 0, interpolation = cv2.INTER_NEAREST)
-    	    print(seg.shape)
+    	    #print(seg.shape)
     	    seg_save_path = os.path.join(args.save_dir, f"{name}")
     	    image_save_path = os.path.join(args.save_dir, f"{name}_input.png")
     	    if not os.path.isdir(args.save_dir):

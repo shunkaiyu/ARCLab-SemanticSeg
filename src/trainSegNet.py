@@ -100,6 +100,34 @@ np.random.seed(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+def getransform(x):
+    im_mean = [0.337, 0.212, 0.182]
+    im_std = [0.278, 0.218, 0.185]
+    if x == "train":
+        return transforms.Compose([
+                #transforms.Resize(interpolation=Image.BILINEAR,size=(480,848)),
+                transforms.RandomRotation(degrees=(-90, 90)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
+                # transforms.Normalize(mean=im_mean,
+                #                     std=im_std),
+                transforms.RandomCrop((368,640)),
+                transforms.ToTensor(),
+            ])
+    else:
+        return transforms.Compose([
+                #transforms.Resize(interpolation=Image.NEAREST,size=(480,848)),
+                transforms.RandomRotation(degrees=(-90, 90)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
+                # transforms.Normalize(mean=im_mean,
+                #                     std=im_std),
+                transforms.RandomCrop((368,640)),
+                transforms.ToTensor(),
+        ])
+
 
 def main():
     # setup and display args on debug.log
@@ -116,25 +144,25 @@ def main():
 
     # Data Augmentations and Loading
 
-    im_mean = [0.337, 0.212, 0.182]
-    im_std = [0.278, 0.218, 0.185]
-    data_transform = transforms.Compose([
-        transforms.ToTensor(),
-        # transforms.Resize(256)
-        transforms.RandomRotation(degrees=(-90, 90)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
-        transforms.Normalize(mean=im_mean,
-                             std=im_std),
-        transforms.RandomSizedCrop(256),
-    ])
+    # im_mean = [0.337, 0.212, 0.182]
+    # im_std = [0.278, 0.218, 0.185]
+    # data_transform = transforms.Compose([
+    #     transforms.ToTensor(),
+    #     # transforms.Resize(256)
+    #     transforms.RandomRotation(degrees=(-90, 90)),
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.RandomVerticalFlip(),
+    #     transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
+    #     # transforms.Normalize(mean=im_mean,
+    #     #                      std=im_std),
+    #     transforms.RandomCrop(360),
+    # ])
 
     rotate, horizontal_flip, vertical_flip = True, True, True
     logger.info(f"Data Augmentations: rotate={rotate}, horizontal_flip={horizontal_flip}, vertical_flip={vertical_flip}")
 
     image_datasets = {x: SegNetDataset(os.path.join(args.data_dir, x), args.cropSize, args.json_path, x, args.dataset, 
-                      image_size, rotate=rotate, horizontal_flip=horizontal_flip, vertical_flip=vertical_flip, full_res_validation=args.full_res_validation, transform=data_transform) for x in ['train', 'test']}
+                      image_size, rotate=rotate, horizontal_flip=horizontal_flip, vertical_flip=vertical_flip, full_res_validation=args.full_res_validation, transform=getransform(x)) for x in ['train', 'test']}
 
     dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x],
                                                   batch_size=args.trainBatchSize if x == 'train' else args.valBatchSize,
@@ -206,10 +234,10 @@ def main():
     else:
         return "Model not available!"
     
-    if args.cropSize != -1:
-        print(summary(model, input_size=(3, args.cropSize, args.cropSize)), flush=True)
-    else:
-        print(summary(model, input_size=(3, args.resizedHeight, args.resizedWidth)), flush=True)
+    # if args.cropSize != -1:
+    #     print(summary(model, input_size=(3, args.cropSize, args.cropSize)), flush=True)
+    # else:
+    #     print(summary(model, input_size=(3, args.resizedHeight, args.resizedWidth)), flush=True)
 
     # distributions of pixels per class
     # # of classes in each image
@@ -332,7 +360,7 @@ def main():
 
     for epoch in range(args.epochs):
 
-        if (epoch+1) == 1 or (epoch+1) % 25 == 0: # dice coefficient and hausdorff distance every 25 epochs
+        if (epoch+1) == 25:
             train_loss, train_dice_coeff, train_haus_dist = train(dataloaders['train'], model, criterion, dice_loss, focal_loss, optimizer, scheduler, epoch, key, train_losses, image_mean, image_std, logger, args)
             logger.info(f"Epoch {epoch+1}/{args.epochs}: Train Loss={train_loss}, Avg. Train DC={train_dice_coeff}, Avg. Train HD={train_haus_dist}, LR={optimizer.param_groups[0]['lr']}")
 
@@ -444,7 +472,8 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
         # else:
         #     img = img.view(-1, 3, args.resizedHeight, args.resizedWidth)
         #     gt = gt.view(-1, 3, args.resizedHeight, args.resizedWidth)
-        
+        # print(gt.shape)
+        # print(label.shape)
         img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
 
         # Process the network inputs and outputs
@@ -487,9 +516,9 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
         optimizer.step()
 
         seg = torch.argmax(seg, dim=1)
-
+        seg = seg.cuda()
         # Dice Coefficient and Hausdorff Distance Metrics every 10 epochs
-        if (epoch+1) == 1 or (epoch+1) % 25 == 0:
+        if (epoch+1) == 50: #or (epoch+1) % 10 == 0:
             for seg_im, label_im in zip(seg, label): # iterate over each image in the batch
                 seg_im, label_im = one_hot(seg_im, len(key)), one_hot(label_im, len(key))
                 seg_im, label_im = seg_im.cpu(), label_im.cpu()
@@ -514,8 +543,10 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
 
         train_loop.set_description(f"Epoch [{epoch + 1}/{args.epochs}]")
         
-        if args.display_samples == "True":
-            utils.displaySamples(img, seg, gt, use_gpu, key, False, epoch, i)
+        # if args.display_samples == "True":
+        #     #print("showing training images")
+        #     utils.displaySamples(img, seg, gt, use_gpu, key, False, epoch, i)
+        utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
         
     losses.append(total_train_loss / len(train_loop))
 
@@ -574,9 +605,9 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
         evaluator.addBatch(seg, oneHotGT, args)
 
         seg = torch.argmax(seg, dim=1)
-
+        seg = seg.cuda()
         # Dice Coefficient and Hausdorff Distance Metrics every 10 epochs
-        if (epoch+1) == 1 or (epoch+1) % 25 == 0:
+        if (epoch+1) == 100:# or (epoch+1) % 10 == 0:
             for seg_im, label_im in zip(seg, label): # iterate over each image in the batch
                 seg_im, label_im = one_hot(seg_im, len(key)), one_hot(label_im, len(key))
                 seg_im, label_im = seg_im.cpu(), label_im.cpu()
@@ -601,10 +632,10 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
         
         val_loop.set_description(f"Epoch [{epoch + 1}/{args.epochs}]")
 
-        if args.display_samples == "True":
-            utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
-        elif args.display_samples == "False" and args.save_samples == "True" and (epoch+1) == args.epochs:
-            utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
+        # if args.display_samples == "True":
+        #     utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
+        # elif args.display_samples == "False" and args.save_samples == "True" and (epoch+1) == args.epochs:
+        #     utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
 
         
     losses.append(total_val_loss / len(val_loop)), avg_dice_coeff, avg_haus_dist

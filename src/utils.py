@@ -131,8 +131,9 @@ def displaySamples(img, generated, gt, use_gpu, key, saveSegs, epoch, imageNum, 
 
     #stacked = np.concatenate((img, generated, gt), axis = 1)
     stacked = np.concatenate((generated, gt), axis = 1)
-
+    #print(saveSegs,epoch,total_epochs)
     if saveSegs == "True" and (epoch+1) == total_epochs:
+        #print("save image")
         file_name = 'epoch_%d_img_%d.png' %(epoch, imageNum)
         save_path = os.path.join(save_dir, file_name)
         print(f"saving {save_path}")
@@ -140,10 +141,10 @@ def displaySamples(img, generated, gt, use_gpu, key, saveSegs, epoch, imageNum, 
             os.mkdir(save_dir)
         cv2.imwrite(save_path, stacked*255)
 
-    cv2.namedWindow('Input | Gen | GT', cv2.WINDOW_NORMAL)
-    cv2.imshow('Input | Gen | GT', stacked)
+    # cv2.namedWindow('Input | Gen | GT', cv2.WINDOW_NORMAL)
+    # cv2.imshow('Input | Gen | GT', stacked)
 
-    cv2.waitKey(1)
+    # cv2.waitKey(1)
 
 def disentangleKey(key):
     '''
