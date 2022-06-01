@@ -1,0 +1,3 @@
+
+./src/model/vit_checkpoint/imagenet21K/ViT-B_16.npz
+./src/model/vit_checkpoint/imagenet21K/R50+ViT-B_16.npz
