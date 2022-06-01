@@ -3,6 +3,7 @@ Semantic Segmentation on Surgical Images
 '''
 
 # torch imports
+from pyrsistent import freeze
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -11,8 +12,9 @@ import torch.utils.data
 from torchsummary import summary
 import segmentation_models_pytorch as smp
 from torchvision import transforms, datasets
-from deeplabv3T import DeepLabV3Plus
-
+#from deeplabv3T import DeepLabV3Plus
+#from deeplabv3T_localOnly import DeepLabV3Plus
+from deeplabv3T_feelvos import DeepLabV3Plus
 
 # general imports
 import argparse
@@ -117,9 +119,9 @@ def getransform(x):
                 transforms.RandomRotation(degrees=(-90, 90)),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomVerticalFlip(),
-                # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
-                # transforms.Normalize(mean=im_mean,
-                #                     std=im_std),
+                # # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
+                # # transforms.Normalize(mean=im_mean,
+                # #                     std=im_std),
                 transforms.RandomCrop((368,640)),
                 transforms.ToTensor(),
             ])
@@ -129,9 +131,9 @@ def getransform(x):
                 transforms.RandomRotation(degrees=(-90, 90)),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomVerticalFlip(),
-                # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
-                # transforms.Normalize(mean=im_mean,
-                #                     std=im_std),
+                # # transforms.ColorJitter(brightness = 0.1, contrast = 0.1),
+                # # transforms.Normalize(mean=im_mean,
+                # #                     std=im_std),
                 transforms.RandomCrop((368,640)),
                 transforms.ToTensor(),
         ])
@@ -143,10 +145,17 @@ def main():
     args = parser.parse_args()
     print(f"args: {args}")
     #print(args.use_high_level)
-    use_high_level = bool(args.use_high_level)
-    use_low_level = bool(args.use_low_level)
-    # print(use_high_level,use_low_level)
-    # print(type(use_high_level))
+    print("use high", args.use_high_level)
+    if args.use_high_level == "False":
+        use_high_level = False
+    else:
+        use_high_level = True
+    if args.use_low_level == "False":
+        use_low_level = False
+    else:
+        use_low_level = True
+    print(use_high_level,use_low_level)
+    print(type(use_high_level))
 
     # logger setup and display args on train.log
     log_path = os.path.join(args.save_dir, "train.log")
@@ -254,6 +263,26 @@ def main():
             classes=num_classes
         )
         model = model.to(device)
+    elif args.model == "smp_DeepLabV3+T_localOnly":
+        model = DeepLabV3Plus(
+            use_high_level = use_high_level,
+            use_low_level = use_low_level,
+            encoder_name="resnet18",
+            encoder_weights= "imagenet",
+            in_channels=3,
+            classes=num_classes
+        )
+        model = model.to(device)
+    elif args.model == "smp_DeepLabV3+T_feelvos":
+        model = DeepLabV3Plus(
+            use_high_level = use_high_level,
+            use_low_level = use_low_level,
+            encoder_name="resnet18",
+            encoder_weights= "imagenet",
+            in_channels=3,
+            classes=num_classes
+        )
+        model = model.to(device)
     else:
         return "Model not available!"
     
@@ -277,6 +306,13 @@ def main():
     else:
         return "Dataset not available!"
 
+    # freeze = False
+    # if freeze:
+    #     print("---freezing model---")
+    #     model = torch.load("/home/arcseg/Desktop/Shunkai-working/results/smp_DeepLabV3+T_feelvos_hl_False_ll_False_freez/cholec_test/480x848_test/dice_factor_0.0_focal_factor_0.0/bs_train4_val2/imsize_480x848_wd_0.00001_optim_Adam_lr1e-3_steps_4_gamma_0.1/e20_seed6210/smp_DeepLabV3+T_feelvos_cholec_bs4lr0.001e20_checkpoint")
+    #     for param in model.parameters():
+    #         model.requires_grad = False
+    
 
     # Optionally resume training from a checkpoint
     if args.resume:
@@ -341,6 +377,9 @@ def main():
         if args.optimizer == "Adam":
             optimizer = optim.Adam(model.parameters(), lr = args.lr, weight_decay=args.wd)
             logger.info(f"{args.optimizer} Optimizer LR = {args.lr} with WD = {args.wd}")
+        # elif args.optimizer == "Adam" and freeze == True:
+        #     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr = args.lr, weight_decay=args.wd)
+        #     logger.info(f"{args.optimizer} Optimizer LR = {args.lr} with WD = {args.wd}")
         elif args.optimizer == "AdamW":
             optimizer = optim.AdamW(model.parameters(), lr = args.lr, weight_decay=args.wd)
             logger.info(f"{args.optimizer} Optimizer LR = {args.lr} with WD = {args.wd}")
@@ -477,6 +516,7 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
 
     # Switch to train mode
     model.train()
+    print("Enter training: ")
 
     train_loop = tqdm(enumerate(train_loader), total=len(train_loader))
 
@@ -496,12 +536,13 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
         # else:
         #     img = img.view(-1, 3, args.resizedHeight, args.resizedWidth)
         #     gt = gt.view(-1, 3, args.resizedHeight, args.resizedWidth)
-        
+        #print(torch.mean(img))
         img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
-        globleimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
-        localimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
+        globleimg = utils.normalize(globleimg, torch.Tensor(img_mean), torch.Tensor(img_std))
+        localimg = utils.normalize(localimg, torch.Tensor(img_mean), torch.Tensor(img_std))
 
         # Process the network inputs and outputs
+        #print(img == localimg)
 
         if use_gpu:
             img = img.cuda()
@@ -515,9 +556,11 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
         # Compute output
         #model.eval()
         #seg = model(img)
-
-        seg = model(img, globleimg,localimg)
-
+        if args.model == "smp_DeepLabV3+":
+            seg = model(img)
+        else:
+            seg = model(img, globleimg,localimg)
+        #seg = model(img, localimg)
         # print(seg.shape)
 
         #if args.dataset == "synapse":
@@ -578,6 +621,7 @@ def train(train_loader, model, criterion, dice_loss, focal_loss, optimizer, sche
             utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)
         
     losses.append(total_train_loss / len(train_loop))
+    #print("exit training ")
 
     if (epoch+1) == 1 or (epoch+1) % 25 == 0:
         return total_train_loss/len(train_loop), avg_dice_coeff, avg_haus_dist
@@ -593,6 +637,7 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
 
     # Switch to evaluate mode
     model.eval()
+    print("Enter validation ")
 
     total_val_loss = 0
     total_dice_coeff = 0
@@ -606,8 +651,8 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
     for i, (img, gt, label, globleimg, localimg) in val_loop:
         # Process the network inputs and outputs
         img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
-        globleimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
-        localimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
+        globleimg = utils.normalize(localimg, torch.Tensor(img_mean), torch.Tensor(img_std))
+        localimg = utils.normalize(globleimg, torch.Tensor(img_mean), torch.Tensor(img_std))
 
 
         oneHotGT = one_hot(label, len(key)).permute(0, 3, 1, 2)
@@ -621,10 +666,12 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
             oneHotGT = oneHotGT.cuda()
 
         # Compute output
-        #seg = model(img)
+        if args.model == "smp_DeepLabV3+":
+            seg = model(img)
+        else:
         #def forward(self, x,use_high_level, use_low_level, globlex=None,localx=None):
-        seg = model(img, globleimg,localimg)
-
+            seg = model(img, globleimg,localimg)
+        #seg = model(img, localimg)
         #if args.dataset == "synapse":
         #print("-----------")
         #print(seg.shape)
@@ -670,6 +717,7 @@ def validate(val_loader, model, criterion, dice_loss, focal_loss, epoch, key, ev
             val_loop.set_postfix(avg_loss = total_val_loss / (i + 1))
         
         val_loop.set_description(f"Epoch [{epoch + 1}/{args.epochs}]")
+        #print("exit validation")
 
         if args.display_samples == "True":
             utils.displaySamples(img, seg, gt, use_gpu, key, saveSegs=args.saveSegs, epoch=epoch, imageNum=i, save_dir=args.seg_save_dir, total_epochs=args.epochs)

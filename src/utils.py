@@ -72,6 +72,9 @@ class Evaluate():
         self.fp += fp.double().cpu()
         self.fn += fn.double().cpu()
 
+    def getFalsePN(self):
+        return self.fp, self.fn
+
     def getIoU(self):
         num = self.tp
         den = self.tp + self.fp + self.fn + 1e-15

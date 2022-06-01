@@ -6,6 +6,7 @@ Stand-alone utility to evaluate segmentation predictions using a trained model.
 
 # torch imports
 import segmentation_models_pytorch as smp
+from deeplabv3T import DeepLabV3Plus
 import cv2
 
 # general imports
@@ -33,18 +34,19 @@ from torch.nn.functional import one_hot
 from utils import dice
 from dice_loss import DiceLoss
 from skimage.metrics import hausdorff_distance
+from scipy.spatial.distance import directed_hausdorff
 from torchgeometry.losses.focal import FocalLoss  
-
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import utils
 from model.segnet import SegNet
-from data.dataloaders.SegNetDataLoaderV3 import SegNetDataset
+from data.dataloaders.SegNetDataLoaderV2T import SegNetDataset
 
 parser = argparse.ArgumentParser(description='PyTorch Semantic Segmentation Evaluation')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',
             help='number of data loading workers (default: 4)')
-parser.add_argument('--batchSize', default=1, type=int,
+parser.add_argument('--batchSize', default=2, type=int,
             help='Mini-batch size (default: 1)')
 parser.add_argument('--bnMomentum', default=0.1, type=float,
             help='Batch Norm Momentum (default: 0.1)')
@@ -52,6 +54,8 @@ parser.add_argument('--imageSize', default=256, type=int,
             help='height/width of the input image to the network')
 parser.add_argument('--model', default='', type=str, metavar='PATH',
             help='path to latest checkpoint (default: none)')
+parser.add_argument('--model_name', default='', type=str, metavar='MODEL',
+            help=' ')
 parser.add_argument('--save-dir', dest='save_dir',
             help='The directory used to save the evaluated images',
             default='save_temp', type=str)
@@ -59,6 +63,8 @@ parser.add_argument('--saveTest', default='False', type=str,
             help='Saves the validation/test images if True')
 parser.add_argument('--data_path',
             help='Data directory to be evaluated', default='data_temp', type=str)
+parser.add_argument('--use_high_level', default="False", type=str, help='use high level temporal feature')
+parser.add_argument('--use_low_level', default="False", type=str, help='use low level temporal feature')
 
 #use_gpu = torch.cuda.is_available()
 # GPU Check
@@ -126,29 +132,50 @@ def main():
     # json path for class definitions
     json_path = "../src/data/classes/cholecSegClasses.json"
 
-    image_dataset = SegNetDataset(os.path.join(data_dir,'test'), data_transform, json_path, 'test')
-    #print(len(image_dataset))
+    # image_dataset = SegNetDataset(os.path.join(data_dir,'test'), data_transform, json_path, 'test')
+    # #print(len(image_dataset))
+    # dataloader = torch.utils.data.DataLoader(image_dataset,
+    #                                          batch_size=args.batchSize,
+    #                                          shuffle=True,
+    #                                          num_workers=args.workers)
+
+    image_dataset = SegNetDataset(os.path.join(data_dir, 'test'), -1, json_path, 'test', "cholec", 
+                      full_res_validation="True", transform=data_transform)
+
     dataloader = torch.utils.data.DataLoader(image_dataset,
-                                             batch_size=args.batchSize,
-                                             shuffle=True,
-                                             num_workers=args.workers)
+                                                  batch_size=args.batchSize,
+                                                  shuffle=True,
+                                                  num_workers=args.workers)
 
     # Get the dictionary for the id and RGB value pairs for the dataset
     classes = image_dataset.classes
     key = utils.disentangleKey(classes)
     num_classes = len(key)
 
+    use_high_level = bool(args.use_high_level)
+    use_low_level = bool(args.use_low_level)
     # Initialize the model
     # TODO: match model initialization code with trainSegNet.py (i.e. model = UNet, ResNetUNet, etc.)
     # model = SegNet(args.bnMomentum, num_classes)
-    model = smp.DeepLabV3Plus(
+    if args.model_name == "smp_DeepLabV3+":
+        print("----no time matching----")
+        model = smp.DeepLabV3Plus(
+                encoder_name="resnet18",
+                in_channels=3,
+                classes=num_classes
+        )
+        model = model.to(device)
+    elif args.model_name == "smp_DeepLabV3+T":
+        print("----with time matching----")
+        model = DeepLabV3Plus(
+            use_high_level = use_high_level,
+            use_low_level = use_low_level,
             encoder_name="resnet18",
             in_channels=3,
             classes=num_classes
-    )
-    model = model.to(device)
+        )
+        model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-
     # Load the saved model
     if os.path.isfile(args.model):
         print("=> loading checkpoint '{}'".format(args.model))
@@ -178,6 +205,7 @@ def main():
 
     # Calculate the metrics
     print('>>>>>>>>>>>>>>>>>> Evaluating the Metrics <<<<<<<<<<<<<<<<<')
+    FP, FN = evaluator.getFalsePN()
     IoU = evaluator.getIoU()
     print('Mean IoU: {}, Class-wise IoU: {}'.format(torch.mean(IoU), IoU))
     PRF1 = evaluator.getPRF1()
@@ -185,7 +213,9 @@ def main():
     print('Mean Precision: {}, Class-wise Precision: {}'.format(torch.mean(precision), precision))
     print('Mean Recall: {}, Class-wise Recall: {}'.format(torch.mean(recall), recall))
     print('Mean F1: {}, Class-wise F1: {}'.format(torch.mean(F1), F1))
-
+    print('Class-wise False Positive: {}'.format(FP))
+    print('Class-wise False Negative: {}'.format(FN))
+@torch.no_grad() # disables gradient calculations
 def validate(val_loader, model, criterion, key, evaluator):
     '''
         Run evaluation
@@ -199,27 +229,37 @@ def validate(val_loader, model, criterion, key, evaluator):
     total_samples = args.batchSize
 
     val_loop = tqdm(enumerate(val_loader), total=len(val_loader))
+    print(len(val_loop))
     # Switch to evaluate mode
     model.eval()
 
-    image_mean = [0.337, 0.212, 0.182]
-    image_std = [0.278, 0.218, 0.185]
-    for i, (img, gt, label) in enumerate(val_loader):
-
+    img_mean = [0.337, 0.212, 0.182]
+    img_std = [0.278, 0.218, 0.185]
+    for i, (img, gt, label, globleimg, localimg) in val_loop:
+    # for i, (img, gt, label) in val_loop:
+    #     globleimg = None
+    #     localimg = None
         # Process the network inputs and outputs
         img = utils.normalize(img, torch.Tensor([0.337, 0.212, 0.182]), torch.Tensor([0.278, 0.218, 0.185]))
         #img = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
         oneHotGT = one_hot(label, len(key)).permute(0, 3, 1, 2)
 	
-        img, label = Variable(img), Variable(label)
+        #img, label = Variable(img), Variable(label)
+        globleimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
+        localimg = utils.normalize(img, torch.Tensor(img_mean), torch.Tensor(img_std))
 
         if use_gpu:
             img = img.cuda()
             label = label.cuda()
             oneHotGT = oneHotGT.cuda()
+            globleimg = globleimg.cuda()
+            localimg = localimg.cuda()
 
         # Compute output
-        seg = model(img)
+        if args.model_name == "smp_DeepLabV3+":
+            seg = model(img)
+        else:
+            seg = model(img, globleimg,localimg)
         #print("-----------")
         #print(seg.shape)
         # seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
@@ -243,15 +283,18 @@ def validate(val_loader, model, criterion, key, evaluator):
                 seg_im, label_im = one_hot(seg_im, len(key)), one_hot(label_im, len(key))
                 seg_im, label_im = seg_im.cpu(), label_im.cpu()
                 seg_im, label_im = seg_im.permute(2, 0, 1), label_im.permute(2, 0, 1)
+                #dice_time = time.time()
                 total_dice_coeff += dice(seg_im.data, label_im.data)
-
+                #print("dice cost: ", time.time()-dice_time)
                 #if args.dataset == "synapse":
                 #    seg_im, label_im = seg_im[:21], label_im[:21]
-
+                #hd_time = time.time()
+                #seg_im, label_im = seg_im.cuda(), label_im.cuda()
                 for seg_slice, label_slice in zip(seg_im, label_im): # iterate over each image slice
                     seg_slice, label_slice = seg_slice.numpy(), label_slice.numpy()
-                    total_haus_dist += 1000 if hausdorff_distance(seg_slice, label_slice) == np.inf else hausdorff_distance(seg_slice, label_slice)
-            
+                    hd = hausdorff_distance(seg_slice, label_slice)
+                    total_haus_dist += 1000 if hd == np.inf else hd
+                #print("hd_cost: ", time.time()-hd_time)
             avg_dice_coeff = total_dice_coeff / total_samples
             avg_haus_dist = total_haus_dist / total_samples
 

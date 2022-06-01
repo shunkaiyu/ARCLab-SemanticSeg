@@ -23,7 +23,7 @@ class SegNetDataset(Dataset):
 
     def __init__(self, root_dir, crop_size=-1, json_path=None, sample=None, 
                  dataset=None, image_size=[256, 256], horizontal_flip=True, brightness=True, contrast=True,
-                 rotate=True, vertical_flip=True, full_res_validation="True"):
+                 rotate=True, vertical_flip=True, full_res_validation="True", transform=None):
         '''
         args:
 
@@ -58,6 +58,7 @@ class SegNetDataset(Dataset):
         self.rotate = rotate
         self.brightness = brightness
         self.contrast = contrast
+        self.transform = transform
 
         if json_path:
             self.classes = json.load(open(json_path))["classes"]
@@ -92,14 +93,15 @@ class SegNetDataset(Dataset):
 
             gt_image = Image.open(gt_name)
             gt_image = gt_image.convert("RGB")
-
+            
             to_tensor = ToTensor()
             image, gt_image = to_tensor(image), to_tensor(gt_image)
+            #print(image,gt_image)
 
             if self.sample == 'train':
                 # Resize to Half-HD Resolution to do half-crop or five-crop
-                image = TF.resize(image, [256, 256], interpolation=Image.BILINEAR)
-                gt = TF.resize(gt_image, [256, 256], interpolation=Image.NEAREST)
+                image = TF.resize(image, [480, 848], interpolation=Image.BILINEAR)
+                gt = TF.resize(gt_image, [480, 848], interpolation=Image.NEAREST)
 
                 if self.crop_size != -1: # When not -1, you will get 5 Crops for a given [image, gt, label] with the size [self.crop_size, self.crop_size]
                     image_crops = TF.five_crop(img=image, size=self.crop_size)
@@ -141,10 +143,11 @@ class SegNetDataset(Dataset):
                     self.images.append(image)
                     self.gt_images.append(gt)
             elif self.sample == 'test':
+                #print(image)
                 # NOTE: Typically set to "False" unless you want to validate your network on Full-Resolution Images
                 if self.full_res_validation == "True": # when set to "True", you will validate on HD Full-Resolution Images (be aware of decreasing Batch Size to 3 or 1 so it can fit in RAM)
-                    image = TF.resize(image, [256, 256], interpolation=Image.BILINEAR)
-                    gt = TF.resize(gt_image, [480, 854], interpolation=Image.NEAREST)
+                    image = TF.resize(image, [480, 848], interpolation=Image.BILINEAR)
+                    gt = TF.resize(gt_image, [480, 848], interpolation=Image.NEAREST)
                 else:
                     image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
                     gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
@@ -176,33 +179,33 @@ class SegNetDataset(Dataset):
     def __getitem__(self, idx):
         image, gt, label = self.images[idx], self.gt_images[idx], self.labels[idx]
 
-        if self.sample == "train":
-            # Random Horizontal Flip
-            if self.horizontal_flip and random.random() > 0.5:
-                image, gt, label = TF.hflip(image), TF.hflip(gt), TF.hflip(label)
+        # if self.sample == "train":
+        #     # Random Horizontal Flip
+        #     if self.horizontal_flip and random.random() > 0.5:
+        #         image, gt, label = TF.hflip(image), TF.hflip(gt), TF.hflip(label)
             
-            # Random Vertical Flip
-            if self.vertical_flip and random.random() > 0.5:
-                image, gt, label = TF.vflip(image), TF.vflip(gt), TF.vflip(label)
+        #     # Random Vertical Flip
+        #     if self.vertical_flip and random.random() > 0.5:
+        #         image, gt, label = TF.vflip(image), TF.vflip(gt), TF.vflip(label)
             
-            # Random Rotate
-            if self.rotate and random.random() > 0.5:
-                image, gt, label = TF.rotate(image, 90), TF.rotate(gt, 90), TF.rotate(label, 90)
+        #     # Random Rotate
+        #     if self.rotate and random.random() > 0.5:
+        #         image, gt, label = TF.rotate(image, 90), TF.rotate(gt, 90), TF.rotate(label, 90)
             
-            label = label.squeeze()
+        #     label = label.squeeze()
 
-            # Brightness Adjustment
-            if self.brightness and random.random() > 0.5:
-                bright_factor = random.uniform(0.9, 1.1)
-                image = TF.adjust_brightness(image, bright_factor)
+        #     # Brightness Adjustment
+        #     if self.brightness and random.random() > 0.5:
+        #         bright_factor = random.uniform(0.9, 1.1)
+        #         image = TF.adjust_brightness(image, bright_factor)
 
-            # Contrast Adjustment
-            if self.contrast and random.random() > 0.5:
-                cont_factor = random.uniform(0.9, 1.1)
-                image = TF.adjust_contrast(image, cont_factor)
+        #     # Contrast Adjustment
+        #     if self.contrast and random.random() > 0.5:
+        #         cont_factor = random.uniform(0.9, 1.1)
+        #         image = TF.adjust_contrast(image, cont_factor)
             
-            # Random Crop
-            image, gt, label = self.random_crop(image, gt, label, self.resizedWidth, self.resizedHeight)
+        #     # Random Crop
+        #     image, gt, label = self.random_crop(image, gt, label, self.resizedWidth, self.resizedHeight)
 
         
         if self.sample == "test":

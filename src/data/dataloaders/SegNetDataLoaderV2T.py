@@ -1,0 +1,450 @@
+
+
+from tkinter import image_names
+import torch
+from torch.utils.data import Dataset
+from torchvision.transforms import ToTensor
+import torchvision.transforms.functional as TF
+from tqdm import tqdm
+
+import numpy as np
+from PIL import Image
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+import os
+import json
+import random
+import time
+
+
+
+
+
+def tensor_to_image(tensor):
+    tensor = tensor*255
+    tensor = np.array(tensor, dtype=np.uint8)
+    if np.ndim(tensor)>3:
+        assert tensor.shape[0] == 1
+        tensor = tensor[0]
+    return Image.fromarray(tensor)
+
+'''
+DataLoader for Semantic Segmentation on Surgical Datasets
+NOTE: Loads all data into RAM. If your computer doesn't have enough RAM, use V1 dataloader.
+'''
+
+class SegNetDataset(Dataset):
+    '''
+    Dataset Class for Semantic Segmentation on Surgical Data
+    '''
+
+    def __init__(self, root_dir, crop_size=-1, json_path=None, sample=None, 
+                 dataset=None, image_size=[480, 848], horizontal_flip=True, brightness=True, contrast=True,
+                 rotate=True, vertical_flip=True, full_res_validation="True", transform=None):
+        '''
+        args:
+
+        root_dir (str) = File Directory with Input Surgical Images
+
+        transform (callable) = Optional torchvision transforms for data augmentation on training samples
+
+        json_path (str) = File with Semantic Segmentation Class information
+
+        sample (str) = Specify whether the sample is from train, test, or validation set
+
+        dataset (str) = Specify whether the Segmentation dataset is from Synapse, Cholec, or Miccai
+        '''
+        
+        # General Parameters
+        self.root_dir = root_dir
+        self.img_dir = os.path.join(root_dir, 'images')
+        self.gt_dir = os.path.join(root_dir, 'groundtruth')
+        self.image_list = np.array([f for f in os.listdir(self.img_dir) if (f.endswith(".png") or f.endswith(".jpg"))])
+        self.crop_size = crop_size
+        self.sample = sample
+        self.dataset = dataset
+        self.full_res_validation = full_res_validation
+
+        # Data Augmentation Parameters
+        #self.H = 480
+        #self.W = 854
+        self.resizedHeight = image_size[0]
+        self.resizedWidth = image_size[1]
+        self.horizontal_flip = horizontal_flip
+        self.vertical_flip = vertical_flip
+        self.rotate = rotate
+        self.brightness = brightness
+        self.contrast = contrast
+        self.img_path, self.gt_path, self.label_path = [],[],[]
+        self.transform =transform
+        self.framedict = {} # key: video, frame: first frame id 
+        
+
+        if json_path:
+            self.classes = json.load(open(json_path))["classes"]
+        
+        self.key = self.generateKey(self.classes)
+        
+        '''
+        Load Dataset into Memory
+        '''
+
+        self.images, self.gt_images, self.labels = [], [], []
+
+        data_loading = tqdm(enumerate(self.image_list), total=len(self.image_list))
+
+        for idx, val in data_loading:
+
+            img_name = os.path.join(self.img_dir, self.image_list[idx])
+
+            frame_id = int(self.image_list[idx].split('_')[-2])
+            video_id = (self.image_list[idx].split('_')[0])
+            # if video_id in self.framedict:
+            #     if frame_id < self.framedict[video_id]:
+            #         self.framedict[video_id] = frame_id
+            # else:
+            #     self.framedict[video_id] = frame_id
+            if video_id in self.framedict.keys():
+                self.framedict[video_id].add(frame_id)
+            else:
+                self.framedict[video_id] = set()
+
+            #if self.dataset == "synapse":
+            #    gt_file_name = self.image_list[idx][0:-4] + ".png"
+            #elif self.dataset == "cholec":
+            gt_file_name = self.image_list[idx][0:-4] + "_color_mask.png"
+            #elif self.dataset == "miccai":
+            #    gt_file_name = self.image_list[idx][0:-4] + "_gt.png"
+            #else:
+            #    raise ValueError("Ground Truth File Name Does Not Exist")
+
+            gt_name = os.path.join(self.gt_dir, gt_file_name)
+
+            self.img_path.append(img_name)
+            self.gt_path.append(gt_name)
+
+            # image = Image.open(img_name)
+            # image = image.convert("RGB")
+
+            # gt_image = Image.open(gt_name)
+            # gt_image = gt_image.convert("RGB")
+
+            # to_tensor = ToTensor()
+            # image, gt_image = to_tensor(image), to_tensor(gt_image)
+
+            # if self.sample == 'train':
+            #     # Resize to Half-HD Resolution to do half-crop or five-crop
+            #     #image = TF.resize(image, [480, 854])#, interpolation=Image.BILINEAR)
+            #     #gt = TF.resize(gt_image, [480, 854])#, interpolation=Image.NEAREST)
+            #     image = image
+            #     gt = gt_image
+
+            #     if self.crop_size != -1: # When not -1, you will get 5 Crops for a given [image, gt, label] with the size [self.crop_size, self.crop_size]
+            #         image_crops = TF.five_crop(img=image, size=self.crop_size)
+            #         gt_crops = TF.five_crop(img=gt_image, size=self.crop_size)
+
+            #         for im in image_crops:
+            #             self.images.append(im)
+                    
+            #         # Generate Label For Cross Entropy Loss
+            #         for gt in gt_crops:
+            #             gt_label = gt.permute(1, 2, 0)
+            #             gt_label = (gt_label * 255).long()
+            #             catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+
+            #             # Iterate over all the key-value pairs in the class Key dict
+            #             for k in range(len(self.key)):
+            #                 rgb = torch.Tensor(self.key[k])
+            #                 mask = torch.all(gt_label == rgb, axis=2)
+            #                 assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+            #                 catMask[mask] = k
+                    
+            #             catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            #             self.labels.append(catMask)
+            #             self.gt_images.append(gt)
+            #     else:
+            #         gt_label = gt.permute(1, 2, 0)
+            #         gt_label = (gt_label * 255).long()
+            #         catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+                    
+            #         # Iterate over all the key-value pairs in the class Key dict
+            #         for k in range(len(self.key)):
+            #             rgb = torch.Tensor(self.key[k])
+            #             mask = torch.all(gt_label == rgb, axis=2)
+            #             assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+            #             catMask[mask] = k
+                    
+            #         catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            #         self.labels.append(catMask)
+            #         self.images.append(image)
+            #         self.gt_images.append(gt)
+            # elif self.sample == 'test':
+            #     # NOTE: Typically set to "False" unless you want to validate your network on Full-Resolution Images
+            #     if self.full_res_validation == "True": # when set to "True", you will validate on HD Full-Resolution Images (be aware of decreasing Batch Size to 3 or 1 so it can fit in RAM)
+            #         image = TF.resize(image, [256, 256], interpolation=Image.BILINEAR)
+            #         gt = TF.resize(gt_image, [256, 256], interpolation=Image.NEAREST)
+            #     else:
+            #         image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            #         gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+            #         #image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            #         #gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+
+            #     gt_label = gt.permute(1, 2, 0)
+            #     gt_label = (gt_label * 255).long()
+            #     catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+                
+            #     # Iterate over all the key-value pairs in the class Key dict
+            #     for k in range(len(self.key)):
+            #         rgb = torch.Tensor(self.key[k])
+            #         mask = torch.all(gt_label == rgb, axis=2)
+            #         assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+            #         catMask[mask] = k
+                
+            #     catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            #     self.labels.append(catMask)
+            #     self.images.append(image)
+            #     self.gt_images.append(gt)
+            #print(self.img_path)
+            #print(self.gt_path)
+
+            data_loading.set_description(f"Loading {self.sample} images")
+            #print('framedict',self.framedict)
+
+    def __len__(self):
+        return len(self.img_path)
+
+    def __getitem__(self, idx):
+        open_time = time.time()
+        #image, gt, label = self.images[idx], self.gt_images[idx], self.labels[idx]
+        img_name,gt_name = self.img_path[idx],self.gt_path[idx]
+
+        curVideoId = img_name.split('/')[-1].split('_')[0]
+        curVideodesc = img_name.split('/')[-1].split('_')[-1]
+        curFrameid = int(img_name.split('/')[-1].split('_')[-2])
+        # print(curFrameid)
+        # first frame in the operation
+        globleImagePath = os.path.join(self.img_dir, curVideoId + '_'+'frame'+'_'+str(min(self.framedict[curVideoId]))+'_'+curVideodesc)
+
+        # prev frame in the operation
+        idlist = list(self.framedict[curVideoId])
+        lesslist = [i for i in idlist if i < curFrameid]
+        if len(lesslist) == 0:
+            fidx = curFrameid
+        else:
+            fidx = max(lesslist)
+        localImagePath = os.path.join(self.img_dir, curVideoId + '_'+'frame'+'_'+str(fidx)+'_'+curVideodesc)
+
+        globleImage = Image.open(globleImagePath)
+        globleImage = globleImage.convert("RGB")
+
+        localImage = Image.open(localImagePath)
+        localImage = localImage.convert("RGB")
+
+        # print('get img name: ',img_name)
+        #print(len(gt_name))
+        # if True:
+        
+        image = Image.open(img_name)
+        image = image.convert("RGB")
+
+        #print(img_name)
+        #print(localImagePath)
+
+        gt_image = Image.open(gt_name)
+        gt_image = gt_image.convert("RGB")
+
+        #print("open time: ",time.time()-open_time)
+        #to_tensor = ToTensor()
+        #image, gt_image = to_tensor(image), to_tensor(gt_image)
+        #print("enter get item:")
+        #print(image.size)
+        if self.sample == 'train':
+            # Resize to Half-HD Resolution to do half-crop or five-crop
+            #image = TF.resize(image, [480, 854])#, interpolation=Image.BILINEAR)
+            #gt = TF.resize(gt_image, [480, 854])#, interpolation=Image.NEAREST)
+            image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+            globleImage = TF.resize(globleImage, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            localImage = TF.resize(localImage, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            trans_time = time.time()
+
+
+            randseed = random.randrange(0, 20)
+            torch.manual_seed(randseed)
+            image = self.transform(image)
+            torch.manual_seed(randseed)
+            gt = self.transform(gt)
+            torch.manual_seed(randseed)
+            globleImage = self.transform(globleImage)
+            torch.manual_seed(randseed)
+            localImage = self.transform(localImage)
+            #print("trans time: ",time.time()-trans_time)
+            time_after_trans = time.time()
+
+            #print(image == localImage)
+            # print("-------####------")
+            # print(image.shape)
+            # print(gt.shape)
+
+            # if self.crop_size != -1: # When not -1, you will get 5 Crops for a given [image, gt, label] with the size [self.crop_size, self.crop_size]
+            #     image_crops = TF.five_crop(img=image, size=self.crop_size)
+            #     gt_crops = TF.five_crop(img=gt_image, size=self.crop_size)
+
+            #     for im in image_crops:
+            #         self.images.append(im)
+                
+            #     # Generate Label For Cross Entropy Loss
+            #     for gt in gt_crops:
+            #         gt_label = gt.permute(1, 2, 0)
+            #         gt_label = (gt_label * 255).long()
+            #         catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+
+            #         # Iterate over all the key-value pairs in the class Key dict
+            #         for k in range(len(self.key)):
+            #             rgb = torch.Tensor(self.key[k])
+            #             mask = torch.all(gt_label == rgb, axis=2)
+            #             assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+            #             catMask[mask] = k
+                
+            #         catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            #         self.labels.append(catMask)
+            #         self.gt_images.append(gt)
+            # else:
+            gt_label = gt.permute(1, 2, 0)
+            # gt_label = gt.permute(0, 1, 2)
+            gt_label = (gt_label * 255).long()
+            catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+            #print(type(catMask))
+            
+            # Iterate over all the key-value pairs in the class Key dict
+            for k in range(len(self.key)):
+                rgb = torch.Tensor(self.key[k])
+                mask = torch.all(gt_label == rgb, axis=2)
+                assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+                catMask[mask] = k
+            
+            catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            # self.labels.append(catMask)
+            # self.images.append(image)
+            # self.gt_images.append(gt)
+            label = torch.squeeze(catMask)
+            #print(type(catMask))
+            #print("after_trans_time: ", time.time()-time_after_trans)
+        elif self.sample == 'test':
+            #print("enter get item test")
+            test_time = time.time()
+            # NOTE: Typically set to "False" unless you want to validate your network on Full-Resolution Images
+            if self.full_res_validation == "True": # when set to "True", you will validate on HD Full-Resolution Images (be aware of decreasing Batch Size to 3 or 1 so it can fit in RAM)
+                image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+                globleImage = TF.resize(globleImage, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                localImage = TF.resize(localImage, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                randseed = random.randrange(0, 20)
+                torch.manual_seed(randseed)
+                image = self.transform(image)
+                torch.manual_seed(randseed)
+                gt = self.transform(gt)
+                torch.manual_seed(randseed)
+                globleImage = self.transform(globleImage)
+                torch.manual_seed(randseed)
+                localImage = self.transform(localImage)
+                #print("enter test true")
+                # image = TF.resize(image, [480, 854], interpolation=Image.BILINEAR)
+                # gt = TF.resize(gt_image, [480, 854], interpolation=Image.NEAREST)
+            else:
+                image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+                #image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                #gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+
+            #print(type(gt))
+            gt_label = gt.permute(1, 2, 0)
+            gt_label = (gt_label * 255).long()
+            catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
+            
+            # Iterate over all the key-value pairs in the class Key dict
+            for k in range(len(self.key)):
+                rgb = torch.Tensor(self.key[k])
+                mask = torch.all(gt_label == rgb, axis=2)
+                assert mask.shape == catMask.shape, f"mask shape {mask.shape} unequal to catMask shape {catMask.shape}"
+                catMask[mask] = k
+            
+            catMask = catMask.unsqueeze(0) # expands dimension to [1, self.resizedHeight, self.resizedWidth]
+            # self.labels.append(catMask)
+            # self.images.append(image)
+            # self.gt_images.append(gt)
+            label = catMask
+            #print("test time: ", time.time()-test_time)
+
+        # if self.sample == "train":
+        #     # Random Horizontal Flip
+        #     if self.horizontal_flip and random.random() > 0.5:
+        #         image, gt, label = TF.hflip(image), TF.hflip(gt), TF.hflip(label)
+            
+        #     # Random Vertical Flip
+        #     if self.vertical_flip and random.random() > 0.5:
+        #         image, gt, label = TF.vflip(image), TF.vflip(gt), TF.vflip(label)
+            
+        #     # Random Rotate
+        #     if self.rotate and random.random() > 0.5:
+        #         image, gt, label = TF.rotate(image, 90), TF.rotate(gt, 90), TF.rotate(label, 90)
+            
+        #     label = label.squeeze()
+
+        #     # Brightness Adjustment
+        #     if self.brightness and random.random() > 0.5:
+        #         bright_factor = random.uniform(0.9, 1.1)
+        #         image = TF.adjust_brightness(image, bright_factor)
+
+        #     # Contrast Adjustment
+        #     if self.contrast and random.random() > 0.5:
+        #         cont_factor = random.uniform(0.9, 1.1)
+        #         image = TF.adjust_contrast(image, cont_factor)
+            
+        #     # Random Crop
+        #     image, gt, label = self.random_crop(image, gt, label, self.resizedWidth, self.resizedHeight)
+
+        
+        if self.sample == "test":
+            label = label.squeeze()
+        
+        gt = gt * 255
+        #print(image.shape)
+        #print(gt.shape)
+
+        #print(image == localImage)
+
+        return image.type(torch.float32), gt.type(torch.int64), label.type(torch.int64), globleImage.type(torch.float32), localImage.type(torch.float32)
+    
+    def generateKey(self, key):
+        '''
+            Disentangles the key for class and labels obtained from the
+            JSON file
+            Returns a python dictionary of the form:
+                {Class Id: RGB Color Code as numpy array}
+        '''
+        dKey = {}
+        for i in range(len(key)):
+            class_id = int(key[i]['id'])
+            c = key[i]['color']
+            c = c.split(',')
+            c0 = int(c[0][1:])
+            c1 = int(c[1])
+            c2 = int(c[2][:-1])
+            color_array = np.asarray([c0,c1,c2])
+            dKey[class_id] = color_array
+
+        return dKey
+    
+    def random_crop(self, img, mask, label, width, height):
+        assert img.shape[1] >= height, f"img.shape[0]: {img.shape[0]} is not >= height: {height}"
+        assert img.shape[2] >= width, f"img.shape[2]: {img.shape[2]} is not >= width: {width}"
+        assert img.shape[1] == mask.shape[1], f"img.shape[1] {img.shape[1]} != mask.shape[1]: {mask.shape[1]}"
+        assert img.shape[2] == mask.shape[2], f"img.shape[2] {img.shape[2]} != mask.shape[2]: {mask.shape[2]}"
+        x = random.randint(0, img.shape[2] - width)
+        y = random.randint(0, img.shape[1] - height)
+        img = img[:, y:y+height, x:x+width]
+        mask = mask[:, y:y+height, x:x+width]
+        label = label[y:y+height, x:x+width]
+        return img, mask, label

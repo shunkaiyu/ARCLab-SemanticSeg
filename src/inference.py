@@ -6,11 +6,13 @@ Note: If you get error with DeepLabV3+, please see bottom of inference.py
 '''
 
 # torch imports
+from tkinter import Frame
 import torch
 import deeplabv3
 from deeplabv3 import DeepLabV3Plus
 import segmentation_models_pytorch as smp
 import cv2
+import  utils
 
 # general imports
 import argparse
@@ -132,43 +134,59 @@ def main():
     #model = DeepLabV3Plus(encoder_name="resnet18", encoder_weights="imagenet", in_channels=3, classes=num_classes)
     model.to(device)
     model_dir = args.model_path
-    checkpoint = torch.load(model_dir)
+    checkpoint = torch.load("/home/arcseg/Desktop/Shunkai-working/results/smp_DeepLabV3+/cholec_fold2_12_3/368640_random_crop/dice_factor_0.0_focal_factor_0.0/bs_train12_val4/imsize_480x848_wd_0.00001_optim_Adam_lr1e-3_steps_4_gamma_0.1/e50_seed6210/smp_DeepLabV3+_cholec_bs12lr0.001e50_checkpoint")
     model.load_state_dict(checkpoint['state_dict'])
 
     model.eval()
 
+    videoDir = "/home/arcseg/Desktop/Shunkai-working/src/data/video_data/frames"
+    video_list = np.array([f for f in os.listdir(videoDir) if (f.endswith(".png"))])
+
     #for root, dirs, files in os.walk(args.imdir_path, topdown=False):
     #    for name in tqdm(files, total=len(files)):
     #        image_path = os.path.join(root, name)
-    for i in range(0,1):
-    	for j in range(0,1):
-    	    image_path = args.imdir_path
-    	    name = os.path.split(image_path)
-    	    name = name[1]
-    	    image = Image.open(image_path)
-    	    to_tensor = ToTensor()
-    	    im = to_tensor(image)
-    	    im = TF.resize(im, [256, 256], interpolation=TF.InterpolationMode.BILINEAR)
-    	    im = torch.unsqueeze(im, 0)
-    	    im = normalize(im, torch.Tensor(image_mean), torch.Tensor(image_std))
-    	    im = im.to(device)
-    	    seg = model(im)
-    	    seg = torch.argmax(seg, dim=1)
-    	    seg = seg.cpu()
-    	    seg = seg.data.numpy()
-    	    seg = reverseOneHot(seg, key)
-    	    seg = np.squeeze(seg[0]).astype(np.uint8)
-    	    seg = cv2.cvtColor(seg, cv2.COLOR_BGR2RGB)
-    	    #print(seg.shape)
-    	    #seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
-    	    seg = cv2.resize(seg, (854, 480), 0, 0, interpolation = cv2.INTER_NEAREST)
-    	    #print(seg.shape)
-    	    seg_save_path = os.path.join(args.save_dir, f"{name}")
-    	    image_save_path = os.path.join(args.save_dir, f"{name}_input.png")
-    	    if not os.path.isdir(args.save_dir):
-    	        os.mkdir(args.save_dir)
-    	    cv2.imwrite(seg_save_path, seg)
-    	    image.save(image_save_path)
+    for name in video_list:
+        # image_path = args.imdir_path
+        frame = name.split('_')
+        frame = frame[-2]
+        # name = name[1]
+        image_path = videoDir + '/' + name
+        image = Image.open(image_path)
+        to_tensor = ToTensor()
+        im = to_tensor(image)
+        im = TF.resize(im, [480, 848], interpolation=TF.InterpolationMode.BILINEAR)
+        im = torch.unsqueeze(im, 0)
+        im = normalize(im, torch.Tensor(image_mean), torch.Tensor(image_std))
+        im = im.to(device)
+        seg = model(im)
+        seg = torch.argmax(seg, dim=1)
+        seg = seg.cpu()
+        seg = seg.data.numpy()
+        seg = reverseOneHot(seg, key)
+        seg = np.squeeze(seg[0]).astype(np.uint8)
+        seg = cv2.cvtColor(seg, cv2.COLOR_BGR2RGB)
+        # im = im.cpu()
+        # img = im.data.numpy()
+        # img = np.transpose(np.squeeze(img[0]), (1,2,0))
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        #print(type(seg),type(img))
+        #print(seg.shape)
+        #seg = TF.resize(seg, [480, 854], interpolation=Image.NEAREST)
+        #seg = cv2.resize(seg, (854, 480), 0, 0, interpolation = cv2.INTER_NEAREST)
+        #print(seg.shape)
+        #img_h = np.concatenate((img,seg),axis=1)
+        seg_save_path = os.path.join(args.save_dir, f"{name}")
+        # image_save_path = os.path.join(args.save_dir, f"input_{name}")
+        #image_save_path = os.path.join(args.save_dir, f"{name}")
+        if not os.path.isdir(args.save_dir):
+            os.mkdir(args.save_dir)
+        #utils.displaySamples(im, seg, seg, use_gpu, key, "True", epoch=0, imageNum=frame, save_dir=args.save_dir, total_epochs=1)
+        cv2.imwrite(seg_save_path, seg)
+        #print(img_h.shape)
+        #img_h = np.random.random_sample(img_h.shape) * 255
+        # img_h = img_h.astype(np.uint8) * 255
+        # img_h = Image.fromarray(img_h)
+        #seg.save( seg_save_path )
     print("Inference Complete!")
 
 if __name__ == "__main__":

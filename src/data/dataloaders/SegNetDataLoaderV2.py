@@ -23,7 +23,7 @@ class SegNetDataset(Dataset):
     '''
 
     def __init__(self, root_dir, crop_size=-1, json_path=None, sample=None, 
-                 dataset=None, image_size=[256, 256], horizontal_flip=True, brightness=True, contrast=True,
+                 dataset=None, image_size=[480, 848], horizontal_flip=True, brightness=True, contrast=True,
                  rotate=True, vertical_flip=True, full_res_validation="True", transform=None):
         '''
         args:
@@ -92,6 +92,7 @@ class SegNetDataset(Dataset):
 
             self.img_path.append(img_name)
             self.gt_path.append(gt_name)
+            #print("finish init")
 
             # image = Image.open(img_name)
             # image = image.convert("RGB")
@@ -178,18 +179,19 @@ class SegNetDataset(Dataset):
             #print(self.gt_path)
 
             data_loading.set_description(f"Loading {self.sample} images")
+            #print(len(self.images))
 
     def __len__(self):
         return len(self.img_path)
 
     def __getitem__(self, idx):
+        #print("start get item")
         open_time = time.time()
         #image, gt, label = self.images[idx], self.gt_images[idx], self.labels[idx]
         img_name,gt_name = self.img_path[idx],self.gt_path[idx]
         #print(len(img_name))
         #print(len(gt_name))
         # if True:
-        
         image = Image.open(img_name)
         image = image.convert("RGB")
 
@@ -203,13 +205,20 @@ class SegNetDataset(Dataset):
         #print(image.size)
         if self.sample == 'train':
             # Resize to Half-HD Resolution to do half-crop or five-crop
-            #image = TF.resize(image, [480, 854])#, interpolation=Image.BILINEAR)
-            #gt = TF.resize(gt_image, [480, 854])#, interpolation=Image.NEAREST)
+            #print(self.resizedHeight)
+            image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+            gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+            # image = image
+            # gt = gt_image
+            randseed = random.randrange(0, 20)
+            torch.manual_seed(randseed)
             trans_time = time.time()
             image = self.transform(image)
-            gt = self.transform(gt_image)
+            torch.manual_seed(randseed)
+            gt = self.transform(gt)
             #print("trans time: ",time.time()-trans_time)
             time_after_trans = time.time()
+            # print(image.shape)
             # print("-------####------")
             # print(image.shape)
             # print(gt.shape)
@@ -239,6 +248,7 @@ class SegNetDataset(Dataset):
             #         self.gt_images.append(gt)
             # else:
             gt_label = gt.permute(1, 2, 0)
+            # gt_label = gt.permute(0, 1, 2)
             gt_label = (gt_label * 255).long()
             catMask = torch.zeros((gt_label.shape[0], gt_label.shape[1]))
             #print(type(catMask))
@@ -262,10 +272,14 @@ class SegNetDataset(Dataset):
             test_time = time.time()
             # NOTE: Typically set to "False" unless you want to validate your network on Full-Resolution Images
             if self.full_res_validation == "True": # when set to "True", you will validate on HD Full-Resolution Images (be aware of decreasing Batch Size to 3 or 1 so it can fit in RAM)
+                image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
+                gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
+                randseed = random.randrange(0, 20)
+                torch.manual_seed(randseed)
                 image = self.transform(image)
-                gt = self.transform(gt_image)
-                # image = TF.resize(image, [480, 854], interpolation=Image.BILINEAR)
-                # gt = TF.resize(gt_image, [480, 854], interpolation=Image.NEAREST)
+                torch.manual_seed(randseed)
+                gt = self.transform(gt)
+
             else:
                 image = TF.resize(image, [self.resizedHeight, self.resizedWidth], interpolation=Image.BILINEAR)
                 gt = TF.resize(gt_image, [self.resizedHeight, self.resizedWidth], interpolation=Image.NEAREST)
